@@ -263,6 +263,20 @@ def generate_fru_script_content(fru_fields, script_type, board_pn):
 
     return script_content
 
+def simple_split(data: str):
+    """
+    Supported delimiters include:
+    - Comma (,)
+    - Newline (\n)
+    - Forward slash (/)
+    - Backslash (\\)
+    - Tab (\t)
+    - Space ( )
+    """
+    if not data:
+        return []
+    tokens = re.split(r'[,\n/\\\t ]+', data)
+    return [t.strip() for t in tokens if t.strip()]
 
 def generate_fru_scripts(excel_file, ict_mode=False):
     wb = openpyxl.load_workbook(excel_file)
@@ -308,31 +322,35 @@ def generate_fru_scripts(excel_file, ict_mode=False):
             if field_name and field_value:
                 fru_fields[field_name] = field_value
 
-        board_pn = fru_fields.get("Board Part Number", "unknown")
+        raw_board_pn = fru_fields.get("Board Part Number", "unknown")
+        board_pn_list = simple_split(raw_board_pn)
         board_name = strip_field_content(fru_fields.get("Board Product", "unknown"))
         versions.append(get_version_from_fru_id(fru_fields))
 
-        for stage in ["M1", "M3"]:
-            key = (board_pn, stage)
-            # Store first occurrence of each board+stage combination
-            if key not in script_content_map:
-                script_content = generate_fru_script_content(
-                    fru_fields, stage, board_pn
-                )
-                script_content_map[key] = {
-                    "content": script_content,
-                    "board_name": board_name,
-                }
+        for board_pn in board_pn_list:
+            fru_fields["Board Part Number"] = board_pn
 
-        if ict_mode:
-            if board_pn not in ict_script_content_map:
-                ict_script_content = generate_fru_script_content(
-                    fru_fields, "ICT", board_pn
-                )
-                ict_script_content_map[board_pn] = {
-                    "content": ict_script_content,
-                    "board_name": board_name,
-                }
+            for stage in ["M1", "M3"]:
+                key = (board_pn, stage)
+                # Store first occurrence of each board+stage combination
+                if key not in script_content_map:
+                    script_content = generate_fru_script_content(
+                        fru_fields, stage, board_pn
+                    )
+                    script_content_map[key] = {
+                        "content": script_content,
+                        "board_name": board_name,
+                    }
+
+            if ict_mode:
+                if board_pn not in ict_script_content_map:
+                    ict_script_content = generate_fru_script_content(
+                        fru_fields, "ICT", board_pn
+                    )
+                    ict_script_content_map[board_pn] = {
+                        "content": ict_script_content,
+                        "board_name": board_name,
+                    }
 
     # Write all scripts after processing all data
     for (board_pn, stage), data in script_content_map.items():
