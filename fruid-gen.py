@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-__version__ = "v2025.19.0"
+__version__ = "v2025.31.0"
 
 # Set your platform name here
 PLATFORM_NAME = "PlatformName"
@@ -45,6 +45,13 @@ FIELD_CONFIG = {
     "Product Custom Data 4": ("PCD4", ["M3"], None),
     "Product Custom Data 5": ("PCD5", ["M3"], None),
     "Product Custom Data 6": ("PCD6", ["M3"], None),
+}
+
+FIELD_SYNONYMS = {
+    "board serial number": "Board Serial",
+    "fru file id": "Board FRU ID",
+    "part/model number": "Product Part Number",
+    "product serial number": "Product Serial",
 }
 
 
@@ -271,17 +278,28 @@ def simple_split(data: str):
     return [t for t in tokens if t]
 
 
+def standardize_field_name(name):
+    if not isinstance(name, str):
+        return name
+    stripped = strip_field_content(name.splitlines()[0])
+    return FIELD_SYNONYMS.get(stripped.lower(), stripped)
+
+
 def generate_fru_scripts(excel_file, ict_mode=False):
     wb = openpyxl.load_workbook(excel_file)
     sheet = wb.active
+    row_max = sheet.max_row + 1
 
     # Column A is for field name, so check start from column B
-    column_names = {
-        cell.column_letter: cell.value
-        for cell in sheet[1][1:]
-        if cell.value and not sheet.column_dimensions[cell.column_letter].hidden
-    }
-    columns = {col: name for col, name in column_names.items() if name}
+    columns = []
+    for cell in sheet[1][1:100]:
+        col_letter = cell.column_letter
+        if sheet.column_dimensions[col_letter].hidden:
+            continue
+        for row in range(1, min(row_max, 21)):
+            if sheet[f"{col_letter}{row}"].value:
+                columns.append(col_letter)
+                break
     if not columns:
         print("Error: No valid data columns found in the Excel file.")
         sys.exit(1)
@@ -309,8 +327,8 @@ def generate_fru_scripts(excel_file, ict_mode=False):
 
     for col in columns:
         fru_fields = {}
-        for row in range(1, sheet.max_row + 1):
-            field_name = sheet[f"A{row}"].value
+        for row in range(1, row_max):
+            field_name = standardize_field_name(sheet[f"A{row}"].value)
             field_value = sheet[f"{col}{row}"].value
             if field_name and field_value:
                 fru_fields[field_name] = field_value
@@ -321,6 +339,8 @@ def generate_fru_scripts(excel_file, ict_mode=False):
         versions.append(get_version_from_fru_id(fru_fields))
 
         for board_pn in board_pn_list:
+            if not re.fullmatch(r"(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]+", board_pn):
+                continue
             fru_fields["Board Part Number"] = board_pn
 
             for stage in ["M1", "M3"]:
